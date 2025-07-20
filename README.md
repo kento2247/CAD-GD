@@ -1,5 +1,5 @@
 # CAD_GD-CVPR25
-(CVPR25) This repository is the official implementation of our AAAI 2024 Paper [Exploring Contextual Attribute Density in Referring Expression Counting](https://arxiv.org/abs/2503.12460)
+(CVPR25) This repository is the official implementation of our Paper [Exploring Contextual Attribute Density in Referring Expression Counting](https://arxiv.org/abs/2503.12460)
 
 ## Installation
 Our code has been tested on Python 3.10 and PyTorch 2.4.0. 
