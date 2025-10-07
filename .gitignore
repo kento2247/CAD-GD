@@ -1,3 +1,6 @@
+datasets
 data
 *.pyc
 GroundingDINO
+*.pth
+exp

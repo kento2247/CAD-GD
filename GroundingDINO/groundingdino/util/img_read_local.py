@@ -1,10 +1,10 @@
 from PIL import Image, ImageOps
-import groundingdino.datasets.transforms as T
+import GroundingDINO.groundingdino.datasets.transforms as T
 from typing import Tuple
 import numpy as np
 import torch
 import random
-from GroundingDINO.util.misc import interpolate
+from GroundingDINO.groundingdino.util.misc import interpolate
 import torchvision.transforms.functional as F
 import os
 import cv2

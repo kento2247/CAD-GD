@@ -4,7 +4,7 @@ import numpy as np
 import copy
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
-from GroundingDINO.util.base_api import (
+from GroundingDINO.groundingdino.util.base_api import (
     load_model,
     threshold,
     threshold_box,

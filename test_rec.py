@@ -41,7 +41,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--pretrain_model",
-    default="/mnt/workspace_new/guijiang/code/CAD-GD-LOCAL-main/ckpt/fsc147_best_model_swinb/last_model.pth",
+    default="ckpt/fsc147_best_model_swinb/last_model.pth",
     type=str,
     help="pretrain pth",
 )

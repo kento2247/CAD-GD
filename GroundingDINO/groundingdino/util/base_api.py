@@ -4,8 +4,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-import GroundingDINO.datasets.transforms as T
-from GroundingDINO.models import build_model
+import GroundingDINO.groundingdino.datasets.transforms as T
+from GroundingDINO.groundingdino.models import build_model
 from GroundingDINO.groundingdino.util.misc import (
     clean_state_dict,
     clean_state_dict_test,

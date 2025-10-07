@@ -21,8 +21,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from GroundingDINO.util import get_tokenlizer
-from GroundingDINO.util.misc import (
+from GroundingDINO.groundingdino.util import get_tokenlizer
+from GroundingDINO.groundingdino.util.misc import (
     NestedTensor,
     accuracy,
     get_world_size,
@@ -31,9 +31,9 @@ from GroundingDINO.util.misc import (
     is_dist_avail_and_initialized,
     nested_tensor_from_tensor_list,
 )
-from GroundingDINO.util.utils import get_phrases_from_posmap
-from GroundingDINO.util.visualizer import COCOVisualizer
-from GroundingDINO.util.vl_utils import (
+from GroundingDINO.groundingdino.util.utils import get_phrases_from_posmap
+from GroundingDINO.groundingdino.util.visualizer import COCOVisualizer
+from GroundingDINO.groundingdino.util.vl_utils import (
     create_positive_map_from_span,
 )
 

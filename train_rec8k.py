@@ -59,7 +59,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--pretrain_model",
-    default="/mnt/workspace_new/guijiang/code/CAD-GD-LOCAL-main/GroundingDINO/groundingdino_swint_ogc.pth",
+    default="groundingdino_swint_ogc.pth",
     type=str,
     help="pretrain pth",
 )

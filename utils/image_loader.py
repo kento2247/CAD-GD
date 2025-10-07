@@ -1,8 +1,8 @@
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
-from GroundingDINO.util.base_api import preprocess_caption
-from GroundingDINO.util.img_read import load_image
+from GroundingDINO.groundingdino.util.base_api import preprocess_caption
+from GroundingDINO.groundingdino.util.img_read import load_image
 from utils.processor import DataProcessor
 import io
 

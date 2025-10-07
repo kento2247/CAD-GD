@@ -41,4 +41,4 @@ text_dropout = 0.0
 fusion_dropout = 0.0
 fusion_droppath = 0.1
 sub_sentence_present = True
-anno_path = "/mnt/workspace_new/guijiang/code/CAD-GD-LOCAL-main/datasets/rec-8k/annotations.json"
+anno_path = "datasets/annotations.json"
