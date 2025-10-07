@@ -4,11 +4,12 @@ from typing import Tuple
 import numpy as np
 import torch
 import random
-from groundingdino.util.misc import interpolate
+from GroundingDINO.util.misc import interpolate
 import torchvision.transforms.functional as F
 import os
 import cv2
 import io
+
 
 def resize(image, target, size, max_size=None):
     # size can be min_size (scalar) or (w, h) tuple
@@ -44,17 +45,20 @@ def resize(image, target, size, max_size=None):
 
     if target is None:
         return rescaled_image, None
-    
+
     rescaled_densities = []
     for t in target:
         count = np.sum(t)
-        rescaled_density = cv2.resize(t, dsize=[size[1], size[0]], interpolation=cv2.INTER_LINEAR)
+        rescaled_density = cv2.resize(
+            t, dsize=[size[1], size[0]], interpolation=cv2.INTER_LINEAR
+        )
         count_new = np.sum(rescaled_density)
         rescaled_density = (count / count_new) * rescaled_density
         rescaled_density = torch.from_numpy(rescaled_density)
         rescaled_densities.append(rescaled_density)
         # rescaled_density = F.resize(target, size)
     return rescaled_image, rescaled_densities
+
 
 class RandomResize(object):
     def __init__(self, sizes, max_size=None):
@@ -65,10 +69,12 @@ class RandomResize(object):
     def __call__(self, img, target=None):
         size = random.choice(self.sizes)
         return resize(img, target, size, self.max_size)
-    
+
+
 class ToTensor(object):
     def __call__(self, img, target):
         return F.to_tensor(img), torch.stack(target, dim=0)
+
 
 class Normalize(object):
     def __init__(self, mean, std):
@@ -80,7 +86,9 @@ class Normalize(object):
         return image, target
 
 
-def load_image(image_path: str, density_dir: str, density_names: list) -> Tuple[np.array, torch.Tensor]:
+def load_image(
+    image_path: str, density_dir: str, density_names: list
+) -> Tuple[np.array, torch.Tensor]:
     transform = T.Compose(
         [
             RandomResize([800], max_size=1333),
@@ -95,7 +103,7 @@ def load_image(image_path: str, density_dir: str, density_names: list) -> Tuple[
     # image_source = Image.open(image_path).convert("RGB")
     density_maps = []
     for name in density_names:
-        density_path = os.path.join(density_dir, name.strip('.')+'.npy')
+        density_path = os.path.join(density_dir, name.strip(".") + ".npy")
         density_source = np.load(density_path)
         density_maps.append(density_source)
     image = np.asarray(image_source)
@@ -104,12 +112,14 @@ def load_image(image_path: str, density_dir: str, density_names: list) -> Tuple[
     image_transformed, density_transformed = transform(image_source, density_maps)
     return image, image_transformed, density_transformed
 
+
 def max_min(img):
     return (img - np.min(img)) / (np.max(img) - np.min(img))
 
-if __name__ == '__main__':
-    img_pth = '/data2/wangzhicheng/Code/referring-expression-counting/datasets/rec-8k/0800-nwpu-3913.jpg'
-    density_dir = '/data2/wangzhicheng/Code/referring-expression-counting/datasets/density_maps/0800-nwpu-3913'
+
+if __name__ == "__main__":
+    img_pth = "/data2/wangzhicheng/Code/referring-expression-counting/datasets/rec-8k/0800-nwpu-3913.jpg"
+    density_dir = "/data2/wangzhicheng/Code/referring-expression-counting/datasets/density_maps/0800-nwpu-3913"
     density_names = os.listdir(density_dir)
     image, image_transformed = load_image(img_pth, density_dir, density_names)
     print(1)

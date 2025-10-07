@@ -21,8 +21,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from groundingdino.util import get_tokenlizer
-from groundingdino.util.misc import (
+from GroundingDINO.util import get_tokenlizer
+from GroundingDINO.util.misc import (
     NestedTensor,
     accuracy,
     get_world_size,
@@ -31,9 +31,11 @@ from groundingdino.util.misc import (
     is_dist_avail_and_initialized,
     nested_tensor_from_tensor_list,
 )
-from groundingdino.util.utils import get_phrases_from_posmap
-from groundingdino.util.visualizer import COCOVisualizer
-from groundingdino.util.vl_utils import create_positive_map_from_span
+from GroundingDINO.util.utils import get_phrases_from_posmap
+from GroundingDINO.util.visualizer import COCOVisualizer
+from GroundingDINO.util.vl_utils import (
+    create_positive_map_from_span,
+)
 
 from ..registry import MODULE_BUILD_FUNCS
 from .backbone import build_backbone
@@ -52,6 +54,8 @@ image-> swin-tf-t -> vison_feature   -> categorical counting module -> queries s
       
 text -> bert      -> context_feature -> 
 """
+
+
 class GroundingDINOCountingGuide(nn.Module):
     """This is the Cross-Attention Detector module that performs object detection"""
 
@@ -66,7 +70,7 @@ class GroundingDINOCountingGuide(nn.Module):
         num_feature_levels=1,
         nheads=8,
         # two stage
-        two_stage_type="no", 
+        two_stage_type="no",
         dec_pred_bbox_embed_share=True,
         two_stage_class_embed_share=True,
         two_stage_bbox_embed_share=True,
@@ -90,16 +94,16 @@ class GroundingDINOCountingGuide(nn.Module):
         """
         if anno_path:
             with open(anno_path, "r") as f:
-                anno= json.load(f)
+                anno = json.load(f)
                 # keep unique cap
                 self.anno = {}
                 for img, caps in anno.items():
                     for cap, items in caps.items():
                         if cap not in self.anno:
                             # delete points from items dict
-                            items.pop('points', None)
+                            items.pop("points", None)
                             self.anno[cap] = items
-                
+
         super().__init__()
         self.num_queries = num_queries
         self.transformer = transformer
@@ -127,13 +131,17 @@ class GroundingDINOCountingGuide(nn.Module):
         self.bert.pooler.dense.bias.requires_grad_(False)
         self.bert = BertModelWarper(bert_model=self.bert)
 
-        self.feat_map = nn.Linear(self.bert.config.hidden_size, self.hidden_dim, bias=True)
+        self.feat_map = nn.Linear(
+            self.bert.config.hidden_size, self.hidden_dim, bias=True
+        )
         nn.init.constant_(self.feat_map.bias.data, 0)
         nn.init.xavier_uniform_(self.feat_map.weight.data)
         # freeze
 
         # special tokens
-        self.specical_tokens = self.tokenizer.convert_tokens_to_ids(["[CLS]", "[SEP]", ".", "?"])
+        self.specical_tokens = self.tokenizer.convert_tokens_to_ids(
+            ["[CLS]", "[SEP]", ".", "?"]
+        )
 
         # prepare input projection layers
         if num_feature_levels > 1:
@@ -150,14 +158,18 @@ class GroundingDINOCountingGuide(nn.Module):
             for _ in range(num_feature_levels - num_backbone_outs):
                 input_proj_list.append(
                     nn.Sequential(
-                        nn.Conv2d(in_channels, hidden_dim, kernel_size=3, stride=2, padding=1),
+                        nn.Conv2d(
+                            in_channels, hidden_dim, kernel_size=3, stride=2, padding=1
+                        ),
                         nn.GroupNorm(32, hidden_dim),
                     )
                 )
                 in_channels = hidden_dim
             self.input_proj = nn.ModuleList(input_proj_list)
         else:
-            assert two_stage_type == "no", "two_stage_type should be no if num_feature_levels=1 !!!"
+            assert (
+                two_stage_type == "no"
+            ), "two_stage_type should be no if num_feature_levels=1 !!!"
             self.input_proj = nn.ModuleList(
                 [
                     nn.Sequential(
@@ -184,12 +196,17 @@ class GroundingDINOCountingGuide(nn.Module):
         nn.init.constant_(_bbox_embed.layers[-1].bias.data, 0)
 
         if dec_pred_bbox_embed_share:
-            box_embed_layerlist = [_bbox_embed for i in range(transformer.num_decoder_layers)]
+            box_embed_layerlist = [
+                _bbox_embed for i in range(transformer.num_decoder_layers)
+            ]
         else:
             box_embed_layerlist = [
-                copy.deepcopy(_bbox_embed) for i in range(transformer.num_decoder_layers)
+                copy.deepcopy(_bbox_embed)
+                for i in range(transformer.num_decoder_layers)
             ]
-        class_embed_layerlist = [_class_embed for i in range(transformer.num_decoder_layers)]
+        class_embed_layerlist = [
+            _class_embed for i in range(transformer.num_decoder_layers)
+        ]
         self.bbox_embed = nn.ModuleList(box_embed_layerlist)
         self.class_embed = nn.ModuleList(class_embed_layerlist)
         self.transformer.decoder.bbox_embed = self.bbox_embed
@@ -197,9 +214,10 @@ class GroundingDINOCountingGuide(nn.Module):
 
         # two stage
         self.two_stage_type = two_stage_type
-        assert two_stage_type in ["no", "standard"], "unknown param {} of two_stage_type".format(
-            two_stage_type
-        )
+        assert two_stage_type in [
+            "no",
+            "standard",
+        ], "unknown param {} of two_stage_type".format(two_stage_type)
         if two_stage_type != "no":
             if two_stage_bbox_embed_share:
                 assert dec_pred_bbox_embed_share
@@ -246,26 +264,33 @@ class GroundingDINOCountingGuide(nn.Module):
         else:
             captions = targets
             # captions = [t["caption"] for t in targets]
-        
+
         # len(captions)
 
-
         # split captions to subject and context
-        subjects, contexts, attributes = [],[],[]
+        subjects, contexts, attributes = [], [], []
         for caption in captions:
-            subject, context, att = split_caption(caption, self.anno) 
-            subjects.append(subject) # ['blue box.', 'yellow box.', '...', '...']
-            contexts.append(context) # ['on table.', 'on ground.', '...', '...']
-            attributes.append(att) # ['blue.','yellow.', '...', '...']
+            subject, context, att = split_caption(caption, self.anno)
+            subjects.append(subject)  # ['blue box.', 'yellow box.', '...', '...']
+            contexts.append(context)  # ['on table.', 'on ground.', '...', '...']
+            attributes.append(att)  # ['blue.','yellow.', '...', '...']
 
-        tokenized_subject = self.tokenizer(subjects, padding="longest", return_tensors="pt").to(samples.device)
-        tokenized_context = self.tokenizer(contexts, padding="longest", return_tensors="pt").to(samples.device)
+        tokenized_subject = self.tokenizer(
+            subjects, padding="longest", return_tensors="pt"
+        ).to(samples.device)
+        tokenized_context = self.tokenizer(
+            contexts, padding="longest", return_tensors="pt"
+        ).to(samples.device)
 
-        tokenized_attribute = self.tokenizer(attributes, padding="longest", return_tensors="pt").to(samples.device)
+        tokenized_attribute = self.tokenizer(
+            attributes, padding="longest", return_tensors="pt"
+        ).to(samples.device)
 
         # encoder texts
-        tokenized = self.tokenizer(captions, padding="longest", return_tensors="pt").to(samples.device)
-        
+        tokenized = self.tokenizer(captions, padding="longest", return_tensors="pt").to(
+            samples.device
+        )
+
         (
             text_self_attention_masks,
             position_ids,
@@ -280,31 +305,45 @@ class GroundingDINOCountingGuide(nn.Module):
             ]
             position_ids = position_ids[:, : self.max_text_len]
             tokenized["input_ids"] = tokenized["input_ids"][:, : self.max_text_len]
-            tokenized["attention_mask"] = tokenized["attention_mask"][:, : self.max_text_len]
-            tokenized["token_type_ids"] = tokenized["token_type_ids"][:, : self.max_text_len]
+            tokenized["attention_mask"] = tokenized["attention_mask"][
+                :, : self.max_text_len
+            ]
+            tokenized["token_type_ids"] = tokenized["token_type_ids"][
+                :, : self.max_text_len
+            ]
 
         # extract text embeddings
         if self.sub_sentence_present:
-            tokenized_for_encoder = {k: v for k, v in tokenized.items() if k != "attention_mask"}
+            tokenized_for_encoder = {
+                k: v for k, v in tokenized.items() if k != "attention_mask"
+            }
             tokenized_for_encoder["attention_mask"] = text_self_attention_masks
             tokenized_for_encoder["position_ids"] = position_ids
         else:
             # import ipdb; ipdb.set_trace()
             tokenized_for_encoder = tokenized
         # last_hidden_state contain the sentence information, pooler_output is a general text feature for input
-        bert_output = self.bert(**tokenized_for_encoder)  
+        bert_output = self.bert(**tokenized_for_encoder)
         # feat_map is used for project text feature space with image feature space
-        encoded_text = self.feat_map(bert_output["last_hidden_state"]) 
-        text_token_mask = tokenized.attention_mask.bool()  
-                
-                
-        mask = tokenized["attention_mask"].bool() 
-        attr_mask = tokenized["attention_mask"].bool() 
+        encoded_text = self.feat_map(bert_output["last_hidden_state"])
+        text_token_mask = tokenized.attention_mask.bool()
 
-        text_subject_mask = (tokenized["input_ids"].unsqueeze(2) == tokenized_subject["input_ids"].unsqueeze(1)).any(dim=2) & mask
-        text_context_mask = (tokenized["input_ids"].unsqueeze(2) == tokenized_context["input_ids"].unsqueeze(1)).any(dim=2) & mask
-        text_attribute_mask = (tokenized["input_ids"].unsqueeze(2) == tokenized_attribute["input_ids"].unsqueeze(1)).any(dim=2) & attr_mask
-        
+        mask = tokenized["attention_mask"].bool()
+        attr_mask = tokenized["attention_mask"].bool()
+
+        text_subject_mask = (
+            tokenized["input_ids"].unsqueeze(2)
+            == tokenized_subject["input_ids"].unsqueeze(1)
+        ).any(dim=2) & mask
+        text_context_mask = (
+            tokenized["input_ids"].unsqueeze(2)
+            == tokenized_context["input_ids"].unsqueeze(1)
+        ).any(dim=2) & mask
+        text_attribute_mask = (
+            tokenized["input_ids"].unsqueeze(2)
+            == tokenized_attribute["input_ids"].unsqueeze(1)
+        ).any(dim=2) & attr_mask
+
         if encoded_text.shape[1] > self.max_text_len:
             encoded_text = encoded_text[:, : self.max_text_len, :]
             text_token_mask = text_token_mask[:, : self.max_text_len]
@@ -312,24 +351,24 @@ class GroundingDINOCountingGuide(nn.Module):
             text_subject_mask = text_subject_mask[:, : self.max_text_len]
             text_context_mask = text_context_mask[:, : self.max_text_len]
             text_attribute_mask = text_attribute_mask[:, : self.max_text_len]
-            
+
             position_ids = position_ids[:, : self.max_text_len]
             text_self_attention_masks = text_self_attention_masks[
                 :, : self.max_text_len, : self.max_text_len
             ]
 
         text_dict = {
-            "encoded_text": encoded_text,  
-            "text_token_mask": text_token_mask,  
-            "position_ids": position_ids,  
-            "text_self_attention_masks": text_self_attention_masks, 
+            "encoded_text": encoded_text,
+            "text_token_mask": text_token_mask,
+            "position_ids": position_ids,
+            "text_self_attention_masks": text_self_attention_masks,
             "text_subject_mask": text_subject_mask,
             "text_context_mask": text_context_mask,
             "text_attribute_mask": text_attribute_mask,
         }
 
         # import ipdb; ipdb.set_trace()
-        
+
         # encoder images
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
@@ -341,25 +380,45 @@ class GroundingDINOCountingGuide(nn.Module):
             srcs.append(self.input_proj[l](src))
             masks.append(mask)
             assert mask is not None
-        if self.num_feature_levels > len(srcs): 
-            _len_srcs = len(srcs) 
+        if self.num_feature_levels > len(srcs):
+            _len_srcs = len(srcs)
             for l in range(_len_srcs, self.num_feature_levels):
-                if l == _len_srcs: 
-                    src = self.input_proj[l](features[-1].tensors) 
+                if l == _len_srcs:
+                    src = self.input_proj[l](features[-1].tensors)
                 else:
                     src = self.input_proj[l](srcs[-1])
                 m = samples.mask
-                mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
+                mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(
+                    torch.bool
+                )[0]
                 pos_l = self.backbone[1](NestedTensor(src, mask)).to(src.dtype)
                 srcs.append(src)
                 masks.append(mask)
                 poss.append(pos_l)
 
         input_query_bbox = input_query_label = attn_mask = dn_meta = None
-        hs, reference, hs_enc, ref_enc, init_box_proposal, img_embs, txt_embs, density, encode_regression_feature, sim_maps = self.transformer( 
-            srcs, masks, input_query_bbox, poss, input_query_label, attn_mask, text_dict, samples.tensors.shape[-2:]
-        ) 
-        
+        (
+            hs,
+            reference,
+            hs_enc,
+            ref_enc,
+            init_box_proposal,
+            img_embs,
+            txt_embs,
+            density,
+            encode_regression_feature,
+            sim_maps,
+        ) = self.transformer(
+            srcs,
+            masks,
+            input_query_bbox,
+            poss,
+            input_query_label,
+            attn_mask,
+            text_dict,
+            samples.tensors.shape[-2:],
+        )
+
         # deformable-detr-like anchor update
         outputs_coord_list = []
         for dec_lid, (layer_ref_sig, layer_bbox_embed, layer_hs) in enumerate(
@@ -372,16 +431,24 @@ class GroundingDINOCountingGuide(nn.Module):
         outputs_coord_list = torch.stack(outputs_coord_list)
 
         # output
-        outputs_class = torch.stack( 
+        outputs_class = torch.stack(
             [
-                layer_cls_embed(layer_hs, text_dict) 
-                for layer_cls_embed, layer_hs in zip(self.class_embed, hs) 
+                layer_cls_embed(layer_hs, text_dict)
+                for layer_cls_embed, layer_hs in zip(self.class_embed, hs)
             ]
         )
 
-        token_masks = text_dict["text_attribute_mask"] 
-        out = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord_list[-1], "img_embs": hs[-1], "txt_embs": txt_embs, "token_masks": token_masks, 'density': density, 'encode_regression_feature': encode_regression_feature} 
-        out['sim_maps'] = sim_maps
+        token_masks = text_dict["text_attribute_mask"]
+        out = {
+            "pred_logits": outputs_class[-1],
+            "pred_boxes": outputs_coord_list[-1],
+            "img_embs": hs[-1],
+            "txt_embs": txt_embs,
+            "token_masks": token_masks,
+            "density": density,
+            "encode_regression_feature": encode_regression_feature,
+        }
+        out["sim_maps"] = sim_maps
         return out
 
     @torch.jit.unused
@@ -393,21 +460,27 @@ class GroundingDINOCountingGuide(nn.Module):
             {"pred_logits": a, "pred_boxes": b}
             for a, b in zip(outputs_class[:-1], outputs_coord[:-1])
         ]
+
+
 # by using the anno map to get the attribute and its type of the cap.
 # cap means caption which is the full text, the type means what type of the attribute is, and the attribute can be color or anything else, like siting and so on
 def split_caption(caption, anno=None):
     if anno is not None:
-        found = [(cap, items['type'], items['class'], items['attribute']) for cap, items in anno.items() if cap.lower()+'.' == caption.lower()]
+        found = [
+            (cap, items["type"], items["class"], items["attribute"])
+            for cap, items in anno.items()
+            if cap.lower() + "." == caption.lower()
+        ]
         if found:
             cap, typ, cls, att = found[0]
-            if typ == 'location':
-                return cls + '.', att + '.', att+ '.'
+            if typ == "location":
+                return cls + ".", att + ".", att + "."
             else:
-                return caption, "", att+ '.'
+                return caption, "", att + "."
         else:
             # print("CAPTION NOT FOUND IN ANNO")
-            return caption, "", ""        
-                            
+            return caption, "", ""
+
 
 @MODULE_BUILD_FUNCS.registe_with_name(module_name="groundingdinocountingguide")
 def build_groundingdinocountingguide(args):

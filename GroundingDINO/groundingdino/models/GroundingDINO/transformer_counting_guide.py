@@ -22,7 +22,7 @@ import torch
 import torch.utils.checkpoint as checkpoint
 from torch import Tensor, nn
 from torch.nn import functional as F
-from groundingdino.util.misc import inverse_sigmoid
+from GroundingDINO.util.misc import inverse_sigmoid
 
 from .fuse_modules import BiAttentionBlock
 from .ms_deform_attn import MultiScaleDeformableAttention as MSDeformAttn
@@ -40,6 +40,7 @@ from .utils import (
     gen_sineembed_for_position,
     get_sine_pos_embed,
 )
+
 
 class Transformer(nn.Module):
     def __init__(
@@ -64,7 +65,7 @@ class Transformer(nn.Module):
         # init query
         learnable_tgt_init=False,
         # two stage
-        two_stage_type="no",  
+        two_stage_type="no",
         embed_init_tgt=False,
         # for text
         use_text_enhancer=False,
@@ -86,10 +87,16 @@ class Transformer(nn.Module):
 
         # choose encoder layer type
         encoder_layer = DeformableTransformerEncoderLayer(
-            d_model, dim_feedforward, dropout, activation, num_feature_levels, nhead, enc_n_points
+            d_model,
+            dim_feedforward,
+            dropout,
+            activation,
+            num_feature_levels,
+            nhead,
+            enc_n_points,
         )
 
-        if use_text_enhancer: # True
+        if use_text_enhancer:  # True
             text_enhance_layer = TransformerEncoderLayer(
                 d_model=d_model,
                 nhead=nhead // 2,
@@ -99,7 +106,7 @@ class Transformer(nn.Module):
         else:
             text_enhance_layer = None
 
-        if use_fusion_layer: # True
+        if use_fusion_layer:  # True
             feature_fusion_layer = BiAttentionBlock(
                 v_dim=d_model,
                 l_dim=d_model,
@@ -120,14 +127,14 @@ class Transformer(nn.Module):
             num_queries=num_queries,
             text_enhance_layer=text_enhance_layer,
             feature_fusion_layer=feature_fusion_layer,
-            use_checkpoint=use_checkpoint, # True
-            use_transformer_ckpt=use_transformer_ckpt, # True
+            use_checkpoint=use_checkpoint,  # True
+            use_transformer_ckpt=use_transformer_ckpt,  # True
         )
 
         # setting the regressor
         self.regressor = DensityRegressor(counter_dim=256)
         self.density_enhance_module = DensityAwareEnhance(channel_attention=True)
-        
+
         # choose decoder layer type
         decoder_layer = DeformableTransformerDecoderLayer(
             d_model,
@@ -161,15 +168,17 @@ class Transformer(nn.Module):
             self.num_patterns = 0
 
         if num_feature_levels > 1:
-            if self.num_encoder_layers > 0: # 6
-                self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model)) 
+            if self.num_encoder_layers > 0:  # 6
+                self.level_embed = nn.Parameter(
+                    torch.Tensor(num_feature_levels, d_model)
+                )
             else:
                 self.level_embed = None
 
         self.learnable_tgt_init = learnable_tgt_init
         assert learnable_tgt_init, "why not learnable_tgt_init"
-        self.embed_init_tgt = embed_init_tgt # True
-        if (two_stage_type != "no" and embed_init_tgt) or (two_stage_type == "no"): 
+        self.embed_init_tgt = embed_init_tgt  # True
+        if (two_stage_type != "no" and embed_init_tgt) or (two_stage_type == "no"):
             self.tgt_embed = nn.Embedding(self.num_queries, d_model)
             nn.init.normal_(self.tgt_embed.weight.data)
         else:
@@ -177,20 +186,21 @@ class Transformer(nn.Module):
 
         # for two stage
         self.two_stage_type = two_stage_type
-        assert two_stage_type in ["no", "standard"], "unknown param {} of two_stage_type".format(
-            two_stage_type
-        )
-        if two_stage_type == "standard": 
+        assert two_stage_type in [
+            "no",
+            "standard",
+        ], "unknown param {} of two_stage_type".format(two_stage_type)
+        if two_stage_type == "standard":
             # anchor selection at the output of encoder
             self.enc_output = nn.Linear(d_model, d_model)
             self.enc_output_norm = nn.LayerNorm(d_model)
             self.two_stage_wh_embedding = None
-        
+
         self.enc_output_regression = nn.Linear(d_model, d_model)
         self.enc_output_regression_norm = nn.LayerNorm(d_model)
 
         if two_stage_type == "no":
-            self.init_ref_points(num_queries)  
+            self.init_ref_points(num_queries)
 
         self.enc_out_class_embed = None
         self.enc_out_bbox_embed = None
@@ -198,7 +208,9 @@ class Transformer(nn.Module):
         self.cross_attention = CrossAttentionLayer(d_model)
         self.query_enhance_module = QueryLinguishDensityModule(d_model)
         # self.query_linguish_module = QueryLinguishModule(d_model)
-        print(f"Total added parameters for cross attention: {sum(p.numel() for p in self.cross_attention.parameters())}")
+        print(
+            f"Total added parameters for cross attention: {sum(p.numel() for p in self.cross_attention.parameters())}"
+        )
         self.query_detach = False
         self.density_warmup = False
         self._reset_parameters()
@@ -225,7 +237,19 @@ class Transformer(nn.Module):
     def init_ref_points(self, use_num_queries):
         self.refpoint_embed = nn.Embedding(use_num_queries, 4)
 
-    def forward(self, srcs, masks, refpoint_embed, pos_embeds, tgt, attn_mask=None, text_dict=None, img_shape=None, image_name=None, captions=None):
+    def forward(
+        self,
+        srcs,
+        masks,
+        refpoint_embed,
+        pos_embeds,
+        tgt,
+        attn_mask=None,
+        text_dict=None,
+        img_shape=None,
+        image_name=None,
+        captions=None,
+    ):
         """
         Input:
             - srcs: List of multi features [bs, ci, hi, wi] # list of 4: [(bs, 256,100,137) (bs,256,50,69), (bs, 256,25,35), (bs, 256,13,18)]
@@ -245,10 +269,10 @@ class Transformer(nn.Module):
             spatial_shape = (h, w)
             spatial_shapes.append(spatial_shape)
 
-            src = src.flatten(2).transpose(1, 2)  
-            mask = mask.flatten(1)  
-            pos_embed = pos_embed.flatten(2).transpose(1, 2)  
-            if self.num_feature_levels > 1 and self.level_embed is not None: 
+            src = src.flatten(2).transpose(1, 2)
+            mask = mask.flatten(1)
+            pos_embed = pos_embed.flatten(2).transpose(1, 2)
+            if self.num_feature_levels > 1 and self.level_embed is not None:
                 lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)
             else:
                 lvl_pos_embed = pos_embed
@@ -274,7 +298,7 @@ class Transformer(nn.Module):
         #########################################################
         # Begin Encoder
         #########################################################
-        memory, memory_text = self.encoder( 
+        memory, memory_text = self.encoder(
             src_flatten,
             pos=lvl_pos_embed_flatten,
             level_start_index=level_start_index,
@@ -306,7 +330,7 @@ class Transformer(nn.Module):
         #########################################################
         # Begin Context Aware Module
         #########################################################
-        # memory, memory_text = self.cadm( 
+        # memory, memory_text = self.cadm(
         #     memory,
         #     pos=lvl_pos_embed_flatten,
         #     level_start_index=level_start_index,
@@ -327,22 +351,34 @@ class Transformer(nn.Module):
         output_memory_regression, output_proposals = gen_encoder_output_proposals(
             memory, mask_flatten, spatial_shapes
         )
-        output_memory_regression = self.enc_output_regression_norm(self.enc_output_regression(output_memory_regression))
+        output_memory_regression = self.enc_output_regression_norm(
+            self.enc_output_regression(output_memory_regression)
+        )
         # 使用enc_out_embed to calculate the similarity of text and vision features.
         if text_dict is not None:
-            enc_outputs_class_unselected = self.enc_out_class_embed(output_memory_regression, text_dict) 
+            enc_outputs_class_unselected = self.enc_out_class_embed(
+                output_memory_regression, text_dict
+            )
         else:
-            enc_outputs_class_unselected = self.enc_out_class_embed(output_memory_regression)
-        context_aware_similarity_feature = output_memory_regression * text_dict['encoded_text'][:,0:1,:]
-        output_memory_regression_dict = {'vision_feature':output_memory_regression,
-                                         'spatial_shape':spatial_shapes}
+            enc_outputs_class_unselected = self.enc_out_class_embed(
+                output_memory_regression
+            )
+        context_aware_similarity_feature = (
+            output_memory_regression * text_dict["encoded_text"][:, 0:1, :]
+        )
+        output_memory_regression_dict = {
+            "vision_feature": output_memory_regression,
+            "spatial_shape": spatial_shapes,
+        }
         N_, S_, C_ = memory.shape
         _cur = 0
         cas_feature = []
         for lvl, (H_, W_) in enumerate(spatial_shapes):
             # mask_flatten_ = mask_flatten[:, _cur : (_cur + H_ * W_)].view(N_, H_, W_, 1)
-            feature_flatten_ = context_aware_similarity_feature[:, _cur : (_cur + H_ * W_)].view(N_, H_, W_, -1)
-            cas_feature.append(feature_flatten_.permute(0,3,1,2))
+            feature_flatten_ = context_aware_similarity_feature[
+                :, _cur : (_cur + H_ * W_)
+            ].view(N_, H_, W_, -1)
+            cas_feature.append(feature_flatten_.permute(0, 3, 1, 2))
             _cur += H_ * W_
         # get the min similarity map
         # b, l, d = enc_outputs_class_unselected.shape
@@ -363,8 +399,8 @@ class Transformer(nn.Module):
         ## 并且细化文本和视觉特征到attribute层面。
         ## additional：我们认为文本特征是划分类别的，比如可以构成一个整体的，他们之间的关联度高，他们之间就有高相似度，比如white car on the floor
         ## 其中white car有高相似度，相比之下，on the floor有高相似度。因此我们取其中一个的最低分就可以表示所有的attribute的最低分。
-        
-        '''
+
+        """
         TODO: 1. 需要变量： 1) the length of text tokens
         2) find the min score to get the unlogit similarity map (from a batch)
             if training
@@ -381,7 +417,7 @@ class Transformer(nn.Module):
             a. get the positive and visual feature by the point map 
             b. get the contrastive loss
         
-        '''
+        """
         similarity_logits = enc_outputs_class_unselected[:, :, 0]  # (bs, \sum{hw})
 
         N_, S_ = similarity_logits.shape
@@ -390,25 +426,27 @@ class Transformer(nn.Module):
         for lvl, (H_, W_) in enumerate(spatial_shapes):
             # mask_flatten_ = mask_flatten[:, _cur : (_cur + H_ * W_)].view(N_, H_, W_, 1)
             sim_map = similarity_logits[:, _cur : (_cur + H_ * W_)].view(N_, H_, W_, -1)
-            sim_maps.append(sim_map.permute(0,3,1,2).sigmoid())
+            sim_maps.append(sim_map.permute(0, 3, 1, 2).sigmoid())
             _cur += H_ * W_
-        
+
         N_, S_, C_ = memory.shape
         _cur = 0
         cnn = []
         for lvl, (H_, W_) in enumerate(spatial_shapes):
             # mask_flatten_ = mask_flatten[:, _cur : (_cur + H_ * W_)].view(N_, H_, W_, 1)
             memory_flatten_ = memory[:, _cur : (_cur + H_ * W_)].view(N_, H_, W_, -1)
-            cnn.append(memory_flatten_.permute(0,3,1,2))
+            cnn.append(memory_flatten_.permute(0, 3, 1, 2))
             _cur += H_ * W_
-        ## TODO: Density Regression 
-        density, density_hidden_features = self.regressor(cas_feature, cnn, img_shape=img_shape, hidden_output=True)
-        
+        ## TODO: Density Regression
+        density, density_hidden_features = self.regressor(
+            cas_feature, cnn, img_shape=img_shape, hidden_output=True
+        )
+
         # pred_num_reg = torch.sum(density, dim=[1,2,3]) / 60
         if self.density_warmup:
-        ## TODO: Density Feature Attention Enhance Module
+            ## TODO: Density Feature Attention Enhance Module
             cnn = cnn
-            print('wrong')
+            print("wrong")
         else:
             # from utils.tsne import vis_feature_tsn
             # for i in range(len(cnn) - 2):
@@ -418,24 +456,26 @@ class Transformer(nn.Module):
             # for i in range(len(cnn) - 2):
             #     for j in range(cnn[0].shape[0]):
             #         vis_feature_tsn(cnn[i][j:j+1,...], f'feature_vis/density_{i}_{j}_feature.jpg', size=64 * (2-i), dim=3)
-        
+
         memory_flatten = []
         for memory_spatial in cnn:
             b, c, h, w = memory_spatial.shape
-            memory_flatten_ = memory_spatial.view(b, c, -1).permute(0,2,1)
+            memory_flatten_ = memory_spatial.view(b, c, -1).permute(0, 2, 1)
             memory_flatten.append(memory_flatten_)
         memory = torch.cat(memory_flatten, dim=1)
-        
+
         ### decoder part
         # 将得到的output_memory经过一个linear进行变形。
-        if self.two_stage_type == "standard": 
+        if self.two_stage_type == "standard":
             output_memory, output_proposals = gen_encoder_output_proposals(
                 memory, mask_flatten, spatial_shapes
             )
             output_memory = self.enc_output_norm(self.enc_output(output_memory))
             # 使用enc_out_embed to calculate the similarity of text and vision features.
             if text_dict is not None:
-                enc_outputs_class_unselected = self.enc_out_class_embed(output_memory, text_dict) 
+                enc_outputs_class_unselected = self.enc_out_class_embed(
+                    output_memory, text_dict
+                )
             else:
                 enc_outputs_class_unselected = self.enc_out_class_embed(output_memory)
             # because 0 is [CLS], which can stand for the whole caption
@@ -445,70 +485,78 @@ class Transformer(nn.Module):
                 self.enc_out_bbox_embed(output_memory) + output_proposals
             )  # (bs, \sum{hw}, 4) unsigmoid
             topk = self.num_queries
-            
+
             # ### temp mod
             # topk = 500
-            
-            # get the relative score topk 
-            topk_proposals = torch.topk(topk_logits, topk, dim=1)[1]  # bs, nq 
+
+            # get the relative score topk
+            topk_proposals = torch.topk(topk_logits, topk, dim=1)[1]  # bs, nq
 
             # lower_idxes, higher_idxes = split_tokens(topk_proposals)
             # lower_tokens = torch.gather( output_memory, 1, lower_idxes.unsqueeze(-1).expand(-1, -1, self.d_model))
             # higher_tokens = torch.gather(output_memory, 1, higher_idxes.unsqueeze(-1).expand(-1, -1, self.d_model))
 
-            # text_subject_mask = text_dict["text_subject_mask"] 
+            # text_subject_mask = text_dict["text_subject_mask"]
             # text_context_mask = text_dict["text_context_mask"]
 
             # # Extracting the tokens using the mask
-            # subject_text_tokens = [text[mask] for text, mask in zip(text_dict["encoded_text"], text_subject_mask)] 
+            # subject_text_tokens = [text[mask] for text, mask in zip(text_dict["encoded_text"], text_subject_mask)]
             # context_text_tokens = [text[mask] for text, mask in zip(text_dict["encoded_text"], text_context_mask)]
-            # max_size = text_dict["encoded_text"].size(1) 
+            # max_size = text_dict["encoded_text"].size(1)
             # padded_subject_text_tokens = torch.stack([F.pad(t, (0, 0, 0, max_size - t.size(0))) for t in subject_text_tokens])
             # padded_context_text_tokens = torch.stack([F.pad(t, (0, 0, 0, max_size - t.size(0))) for t in context_text_tokens])
-            
+
             # subject_mask = torch.stack([torch.cat([torch.ones(t.size(0)).to(t.device), torch.zeros(max_size - t.size(0)).to(t.device)]) for t in subject_text_tokens])
             # context_mask = torch.stack([torch.cat([torch.ones(t.size(0)).to(t.device), torch.zeros(max_size - t.size(0)).to(t.device)]) for t in context_text_tokens])
 
             # lower_tokens = self.cross_attention(lower_tokens, padded_subject_text_tokens, V_mask=subject_mask)
             # if context_mask.sum() > 2: # not all [CLS][SEP] tokens
-            #     higher_tokens = self.cross_attention(higher_tokens, padded_context_text_tokens, V_mask=context_mask) 
+            #     higher_tokens = self.cross_attention(higher_tokens, padded_context_text_tokens, V_mask=context_mask)
             # # 通过cross-attention更新了low-level的特征信息，而后再将其放到原来的output-memory中，做了特征的更新。
             # updated_lower_tokens = self.cross_attention(lower_tokens, higher_tokens)
             # output_memory = output_memory.scatter(1, lower_idxes.unsqueeze(-1).expand(-1, -1, 256), updated_lower_tokens)
 
             # 获取选择的topk的proposal的坐标位置，init-box-proposals是原始的初始化的坐标位置，ref则是增强之后的结果。
             refpoint_embed_undetach = torch.gather(
-                enc_outputs_coord_unselected, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 4)
+                enc_outputs_coord_unselected,
+                1,
+                topk_proposals.unsqueeze(-1).repeat(1, 1, 4),
             )  # unsigmoid
-            
+
             density_feature_flatten = []
             for density_hidden_feature in density_hidden_features:
                 b, c, h, w = density_hidden_feature.shape
-                density_flatten_ = density_hidden_feature.view(b, c, -1).permute(0,2,1)
+                density_flatten_ = density_hidden_feature.view(b, c, -1).permute(
+                    0, 2, 1
+                )
                 density_feature_flatten.append(density_flatten_)
             density_features = torch.cat(density_feature_flatten, dim=1)
-            
+
             density_features_topk = torch.gather(
-                density_features, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, self.d_model)
+                density_features,
+                1,
+                topk_proposals.unsqueeze(-1).repeat(1, 1, self.d_model),
             )
-            
+
             refpoint_embed_ = refpoint_embed_undetach.detach()
             init_box_proposal = torch.gather(
                 output_proposals, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 4)
-            ).sigmoid()  # sigmoid 
+            ).sigmoid()  # sigmoid
             # 获取对应位置的特征信息。
             tgt_undetach = torch.gather(
-                output_memory, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, self.d_model)
-            ) 
+                output_memory,
+                1,
+                topk_proposals.unsqueeze(-1).repeat(1, 1, self.d_model),
+            )
             # 使用了可学习的target embedding
-            if self.embed_init_tgt: 
+            if self.embed_init_tgt:
                 tgt_ = (
                     self.tgt_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)
-                )  
+                )
             else:
                 tgt_ = tgt_undetach.detach()
 
-            if refpoint_embed is not None: 
+            if refpoint_embed is not None:
                 refpoint_embed = torch.cat([refpoint_embed, refpoint_embed_], dim=1)
                 tgt = torch.cat([tgt, tgt_], dim=1)
             else:
@@ -539,9 +587,11 @@ class Transformer(nn.Module):
             init_box_proposal = refpoint_embed_.sigmoid()
 
         else:
-            raise NotImplementedError("unknown two_stage_type {}".format(self.two_stage_type))
-        
-        img_embs = tgt 
+            raise NotImplementedError(
+                "unknown two_stage_type {}".format(self.two_stage_type)
+            )
+
+        img_embs = tgt
 
         #########################################################
         # End preparing tgt
@@ -557,15 +607,23 @@ class Transformer(nn.Module):
         else:
             if self.query_detach:
                 density_feature_topk_detach = density_features_topk.detach()
-                tgt_enhanced = self.query_enhance_module(tgt, text_dict["encoded_text"],density_feature_topk_detach)
+                tgt_enhanced = self.query_enhance_module(
+                    tgt, text_dict["encoded_text"], density_feature_topk_detach
+                )
             else:
-                tgt_enhanced = self.query_enhance_module(tgt, text_dict["encoded_text"],density_features_topk, image_name, captions)
+                tgt_enhanced = self.query_enhance_module(
+                    tgt,
+                    text_dict["encoded_text"],
+                    density_features_topk,
+                    image_name,
+                    captions,
+                )
         ## 做消融实验
         # tgt_enhanced = tgt
         # tgt_enhanced = self.query_linguish_module(tgt, text_dict["encoded_text"])
         # tgt_linguish_density = self.query_linguish_density_module(tgt, text_dict["encoded_text"], density_features_topk)
         # tgt_enhanced = tgt + tgt_enhanced
-        hs, references = self.decoder( 
+        hs, references = self.decoder(
             tgt=tgt_enhanced.transpose(0, 1),
             memory=memory.transpose(0, 1),
             memory_key_padding_mask=mask_flatten,
@@ -588,7 +646,7 @@ class Transformer(nn.Module):
         #########################################################
         # Begin postprocess
         #########################################################
-        if self.two_stage_type == "standard": # yes
+        if self.two_stage_type == "standard":  # yes
             hs_enc = tgt_undetach.unsqueeze(0)
             ref_enc = refpoint_embed_undetach.sigmoid().unsqueeze(0)
         else:
@@ -599,9 +657,20 @@ class Transformer(nn.Module):
         # ref_enc: (n_enc+1, bs, nq, query_dim) or (1, bs, nq, query_dim) or (n_enc, bs, nq, d_model) or None
         #########################################################
 
-        return hs, references, hs_enc, ref_enc, init_box_proposal, img_embs, txt_embs, density, output_memory_regression_dict, sim_maps
+        return (
+            hs,
+            references,
+            hs_enc,
+            ref_enc,
+            init_box_proposal,
+            img_embs,
+            txt_embs,
+            density,
+            output_memory_regression_dict,
+            sim_maps,
+        )
 
-    
+
 class TransformerEncoder(nn.Module):
     def __init__(
         self,
@@ -631,17 +700,19 @@ class TransformerEncoder(nn.Module):
         self.layers = []
         self.text_layers = []
         self.fusion_layers = []
-        if num_layers > 0: 
-            self.layers = _get_clones(encoder_layer, num_layers, layer_share=enc_layer_share)
+        if num_layers > 0:
+            self.layers = _get_clones(
+                encoder_layer, num_layers, layer_share=enc_layer_share
+            )
 
-            if text_enhance_layer is not None: 
+            if text_enhance_layer is not None:
                 self.text_layers = _get_clones(
-                    text_enhance_layer, num_layers, layer_share=enc_layer_share 
-                ) 
-            if feature_fusion_layer is not None: 
+                    text_enhance_layer, num_layers, layer_share=enc_layer_share
+                )
+            if feature_fusion_layer is not None:
                 self.fusion_layers = _get_clones(
                     feature_fusion_layer, num_layers, layer_share=enc_layer_share
-                ) 
+                )
         else:
             self.layers = []
             del encoder_layer
@@ -658,8 +729,8 @@ class TransformerEncoder(nn.Module):
         self.num_layers = num_layers
         self.d_model = d_model
 
-        self.use_checkpoint = use_checkpoint 
-        self.use_transformer_ckpt = use_transformer_ckpt 
+        self.use_checkpoint = use_checkpoint
+        self.use_transformer_ckpt = use_transformer_ckpt
 
     @staticmethod
     def get_reference_points(spatial_shapes, valid_ratios, device):
@@ -723,7 +794,7 @@ class TransformerEncoder(nn.Module):
                 spatial_shapes, valid_ratios, device=src.device
             )
 
-        if self.text_layers: 
+        if self.text_layers:
             # generate pos_text
             bs, n_text, text_dim = memory_text.shape
             if pos_text is None and position_ids is None:
@@ -734,7 +805,9 @@ class TransformerEncoder(nn.Module):
                     .unsqueeze(-1)
                     .repeat(bs, 1, 1)
                 )
-                pos_text = get_sine_pos_embed(pos_text, num_pos_feats=256, exchange_xy=False)
+                pos_text = get_sine_pos_embed(
+                    pos_text, num_pos_feats=256, exchange_xy=False
+                )
             if position_ids is not None:
                 pos_text = get_sine_pos_embed(
                     position_ids[..., None], num_pos_feats=256, exchange_xy=False
@@ -746,7 +819,7 @@ class TransformerEncoder(nn.Module):
             #     if os.environ.get('IPDB_SHILONG_DEBUG', None) == 'INFO':
             #         import ipdb; ipdb.set_trace()
             if self.fusion_layers:
-                if self.use_checkpoint: # 更新vision feature和text feature
+                if self.use_checkpoint:  # 更新vision feature和text feature
                     output, memory_text = checkpoint.checkpoint(
                         self.fusion_layers[layer_id],
                         output,
@@ -762,7 +835,7 @@ class TransformerEncoder(nn.Module):
                         attention_mask_l=text_attention_mask,
                     )
 
-            if self.text_layers: # 更新text feature
+            if self.text_layers:  # 更新text feature
                 memory_text = self.text_layers[layer_id](
                     src=memory_text.transpose(0, 1),
                     src_mask=~text_self_attention_masks,  # note we use ~ for mask here
@@ -870,7 +943,9 @@ class TransformerDecoder(nn.Module):
                 )  # nq, bs, nlevel, 4
             else:
                 assert reference_points.shape[-1] == 2
-                reference_points_input = reference_points[:, :, None] * valid_ratios[None, :]
+                reference_points_input = (
+                    reference_points[:, :, None] * valid_ratios[None, :]
+                )
             query_sine_embed = gen_sineembed_for_position(
                 reference_points_input[:, :, 0, :]
             )
@@ -977,7 +1052,13 @@ class DeformableTransformerEncoderLayer(nn.Module):
         return src
 
     def forward(
-        self, src, pos, reference_points, spatial_shapes, level_start_index, key_padding_mask=None
+        self,
+        src,
+        pos,
+        reference_points,
+        spatial_shapes,
+        level_start_index,
+        key_padding_mask=None,
     ):
         # self attention
         # import ipdb; ipdb.set_trace()
@@ -1145,7 +1226,7 @@ def build_transformer(args):
         dec_n_points=args.dec_n_points,
         learnable_tgt_init=True,
         # two stage
-        two_stage_type=args.two_stage_type, 
+        two_stage_type=args.two_stage_type,
         embed_init_tgt=args.embed_init_tgt,
         use_text_enhancer=args.use_text_enhancer,
         use_fusion_layer=args.use_fusion_layer,
@@ -1161,7 +1242,9 @@ def build_transformer(args):
 class CrossAttentionLayer(nn.Module):
     def __init__(self, d_model):
         super(CrossAttentionLayer, self).__init__()
-        self.cross_attention = nn.MultiheadAttention(embed_dim=d_model, num_heads=8, dropout=0.1)
+        self.cross_attention = nn.MultiheadAttention(
+            embed_dim=d_model, num_heads=8, dropout=0.1
+        )
         self.norm = nn.LayerNorm(d_model)
 
     def forward(self, lower_tokens, higher_tokens, lower_mask=None, V_mask=None):
@@ -1176,8 +1259,8 @@ class CrossAttentionLayer(nn.Module):
 
 def split_tokens(topk_proposals):
     sorted = torch.sort(topk_proposals, dim=1, descending=False)[0]
-    num_lower = int(0.9 * topk_proposals.size(1)) 
+    num_lower = int(0.9 * topk_proposals.size(1))
     lower_idxes = sorted[:, :num_lower]
     higher_idxes = sorted[:, num_lower:]
-    
+
     return lower_idxes, higher_idxes

@@ -4,11 +4,18 @@ import numpy as np
 import torch
 from PIL import Image
 
-import groundingdino.datasets.transforms as T
-from groundingdino.models import build_model
-from groundingdino.util.misc import clean_state_dict, clean_state_dict_test
-from groundingdino.util.slconfig import SLConfig
-from groundingdino.util.utils import get_phrases_from_posmap
+import GroundingDINO.datasets.transforms as T
+from GroundingDINO.models import build_model
+from GroundingDINO.groundingdino.util.misc import (
+    clean_state_dict,
+    clean_state_dict_test,
+)
+from GroundingDINO.groundingdino.util.slconfig import (
+    SLConfig,
+)
+from GroundingDINO.groundingdino.util.utils import (
+    get_phrases_from_posmap,
+)
 
 
 def preprocess_caption(caption: str) -> str:
@@ -18,12 +25,17 @@ def preprocess_caption(caption: str) -> str:
     return result + "."
 
 
-def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda", mode: str = 'train'):
+def load_model(
+    model_config_path: str,
+    model_checkpoint_path: str,
+    device: str = "cuda",
+    mode: str = "train",
+):
     args = SLConfig.fromfile(model_config_path)
     args.device = device
     model = build_model(args)
     checkpoint = torch.load(model_checkpoint_path, map_location="cpu")
-    if mode == 'train':
+    if mode == "train":
         model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
         model.eval()
         return model
@@ -31,7 +43,7 @@ def load_model(model_config_path: str, model_checkpoint_path: str, device: str =
         model.load_state_dict(clean_state_dict_test(checkpoint["model"]), strict=False)
         model.eval()
         return model
-        
+
 
 def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
     transform = T.Compose(
@@ -48,64 +60,65 @@ def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
 
 
 def threshold(
-        outputs,
-        captions: str,
-        tokenizer,
-        text_threshold: float,
-        threshold1 = 0.25,
-        threshold2 = 0.35): 
+    outputs,
+    captions: str,
+    tokenizer,
+    text_threshold: float,
+    threshold1=0.25,
+    threshold2=0.35,
+):
 
     bs = outputs["pred_logits"].shape[0]
 
     ret = []
     for b in range(bs):
-        prediction_logits = outputs["pred_logits"].cpu().sigmoid()[b]  
-        prediction_boxes = outputs["pred_boxes"].cpu()[b]  
+        prediction_logits = outputs["pred_logits"].cpu().sigmoid()[b]
+        prediction_boxes = outputs["pred_boxes"].cpu()[b]
 
         tokenized = tokenizer(captions[b])
-        input_ids = tokenized['input_ids']
-        end_idx = np.where(np.array(input_ids)==1012)[0][-1]
-        
+        input_ids = tokenized["input_ids"]
+        end_idx = np.where(np.array(input_ids) == 1012)[0][-1]
+
         # find mask index where all the valid tokens are above the threshold
         threshold1 = threshold1
         threshold2 = threshold2
         # for global context
         mask1 = prediction_logits[:, 0].gt(threshold1)
         # for local context 找到对于所有文本的响应都高于目标的。
-        mask2 = prediction_logits[:, 1:end_idx].gt(threshold2).all(dim=1) 
+        mask2 = prediction_logits[:, 1:end_idx].gt(threshold2).all(dim=1)
         mask = mask1 & mask2
 
-        logits = prediction_logits[mask]  
-        boxes = prediction_boxes[mask]  
+        logits = prediction_logits[mask]
+        boxes = prediction_boxes[mask]
 
-
-        phrases = [ 
-            get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer).replace('.', '')
-            for logit 
-            in logits
+        phrases = [
+            get_phrases_from_posmap(
+                logit > text_threshold, tokenized, tokenizer
+            ).replace(".", "")
+            for logit in logits
         ]
         ret.append((boxes, logits.max(dim=1)[0], phrases))
 
     return ret
 
-def threshold_box(
-        outputs, threshold=0.3): 
+
+def threshold_box(outputs, threshold=0.3):
 
     bs = outputs["pred_logits"].shape[0]
 
     ret = []
     for b in range(bs):
-        prediction_logits = outputs["pred_logits"].cpu().sigmoid()[b]  
-        prediction_boxes = outputs["pred_boxes"].cpu()[b]  
+        prediction_logits = outputs["pred_logits"].cpu().sigmoid()[b]
+        prediction_boxes = outputs["pred_boxes"].cpu()[b]
 
         # find mask index where all the valid tokens are above the threshold
         threshold = threshold
         # for global context
         # for local context 找到对于所有文本的响应都高于目标的。
-        mask = prediction_logits[:, :].gt(threshold).any(dim=1) 
+        mask = prediction_logits[:, :].gt(threshold).any(dim=1)
 
-        logits = prediction_logits[mask]  
-        boxes = prediction_boxes[mask]  
+        logits = prediction_logits[mask]
+        boxes = prediction_boxes[mask]
 
         ret.append((boxes, logits.max(dim=1)[0]))
 
